@@ -1,0 +1,27 @@
+# --- Python / Django ------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+db.sqlite3
+/staticfiles/
+/media/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- OS / editors ---------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Local Chroma / model caches -----------------------------------------
+/chroma_db/
+.cache/
+
+# --- Local working notes (not part of the project) -----------------------
+context_block.md
+prompts.md

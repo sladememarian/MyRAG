@@ -1,0 +1,6 @@
+# Local development install: pip install -r requirements.txt
+-r requirements-base.txt
+
+# Default torch wheel (CUDA-capable on Linux). Docker uses the smaller CPU
+# wheel through requirements-docker.txt.
+torch>=2.4,<2.5

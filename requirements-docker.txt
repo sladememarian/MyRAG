@@ -1,0 +1,9 @@
+# Docker install: CPU wheels keep the image much smaller than the default CUDA
+# build of torch. Keep this file in sync with requirements.txt through
+# requirements-base.txt.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+-r requirements-base.txt
+
+# CPU-only torch keeps the image small (the extra index is declared above).
+torch==2.4.1+cpu

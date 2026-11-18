@@ -1,0 +1,53 @@
+# Requirements checklist
+
+Mapping of every requirement in the brief to where it is implemented and
+verified.
+
+| # | Requirement | Implementation | Verified by |
+|---|---|---|---|
+| 1 | Django is mandatory | Django 5.2 project `config`, apps `documents`, `qa` | `docker compose up`, all tests |
+| 2 | Must run with Docker Compose | `Dockerfile`, `docker-compose.yml`, `entrypoint.sh` | manual `docker compose up` |
+| 3 | LangChain for processing and LLM | `rag/ingest.py`, `rag/retrieval.py`, `rag/chain.py`, `rag/llm.py` | `tests/rag/*` |
+| 4 | Complete, usable REST API | DRF viewsets + `POST /api/ask/` + history | `tests/api/*` |
+| 5 | UI is Django Admin only | No frontend; admin for documents and queries | `tests/documents/test_admin.py`, `tests/qa/test_admin.py` |
+| 6 | Add / edit / delete documents | Admin + `DocumentViewSet` | `test_admin.py`, `test_documents.py` |
+| 7 | Support `.docx` | `documents/validators.py`, `rag/extract.py` | `test_models.py`, `test_extract.py` |
+| 8 | Store full text | `Document.full_text` filled by `process_document` | `test_admin_upload_extracts_and_indexes` |
+| 9 | Submit a question | Admin add-query, `POST /api/ask/`, `manage.py ask` | `test_ask.py`, `test_admin.py`, `test_ask_command.py` |
+| 10 | Find relevant content | `rag/retrieval.py` (MMR) | `test_retrieval.py` |
+| 11 | Advanced retrieval for accurate answers | MultiQueryRetriever + MMR + de-duplication + scores + relevance floor | `test_retrieve_merges_multi_query_without_duplicates`, `test_retrieve_drops_chunks_below_the_relevance_threshold` |
+| 12 | Generate a grounded text answer | `rag/chain.py` prompt + OpenRouter | `test_chain.py`, live test |
+| 13 | Store question/answer history | `qa.Query`, `qa/services.py` | `test_services.py`, `test_history.py` |
+| 14 | Free OpenRouter model | `OPENROUTER_MODEL=...:free` env, `rag/llm.py` | live test (optional) |
+| 15 | API documentation | drf-spectacular, `/api/docs/`, `docs/openapi.yaml` | manual |
+| 16 | Config via env, no hardcoded keys | `config/settings.py`, `.env.example`, `.gitignore` | review |
+| 17 | Simplicity / explainability | Service layer, ~15-line functions, comments | `docs/07-decisions.md` |
+| 18 | Private history per user | API filters `Query` by owner; admin sees all | `test_history_is_private_to_its_owner` |
+| 19 | Protect the LLM quota | per-user DRF throttle on `/api/ask/` | `test_ask_is_rate_limited_per_user` |
+| 20 | Production-safe deployment | secure defaults, `config/checks.py`, `check --deploy` | manual deployment check (0 issues) |
+| 21 | No orphan vectors or files | delete stops on Chroma failure; media cleanup signals | `test_delete_is_blocked_when_the_index_cannot_be_updated`, file cleanup tests |
+| 22 | Do not leak internals | generic API errors, full details in logs | `test_ask_hides_unexpected_error_details`, `test_upload_hides_processing_error_details` |
+
+## Prompt-by-prompt deliverables
+
+| Prompt | What was built | Doc |
+|---|---|---|
+| 1. Skeleton + Docker | `config/`, `documents/`, `qa/`, `rag/`, compose, entrypoint, env | `docs/02-setup-and-config.md` |
+| 2. Document model + admin | `Document`, validator, admin, hook `process_document()` | `docs/03-data-model-and-admin.md` |
+| 3. Ingestion | `extract.py`, `vectorstore.py`, `ingest.py`, admin actions | `docs/04-rag-pipeline.md` |
+| 4. Retrieval | `retrieval.py` MMR + multi-query + fallback + scores | `docs/04-rag-pipeline.md` |
+| 5. Answer generation | `chain.py`, prompt rules, error handling, `ask` command | `docs/04-rag-pipeline.md` |
+| 6. History | `Query` model + admin (immutable, sources view) | `docs/03-data-model-and-admin.md` |
+| 7. REST API | serializers, viewsets, token/session auth, Swagger, tests | `docs/05-api.md` |
+| 8. Deliverables | README, `docs/`, `sample_data/`, checklist, presentation | `docs/` |
+
+## Testing rules
+
+| Rule | Where |
+|---|---|
+| Docs in top-level `docs/` | `docs/` |
+| Tests in top-level `tests/` by app | `tests/documents`, `tests/rag`, `tests/qa`, `tests/api` |
+| Deterministic + offline | fake embeddings + mocked LLM in `tests/conftest.py` |
+| Real-LLM test separate + `live` | `tests/rag/test_live_llm.py` |
+| One-line docstring per test | every test |
+| `pytest.ini` + runnable in Docker | `pytest.ini`, `docker compose run --rm web pytest` |

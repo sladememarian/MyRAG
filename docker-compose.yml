@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ragdb}
+      POSTGRES_USER: ${POSTGRES_USER:-raguser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-raguser} -d ${POSTGRES_DB:-ragdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    env_file:
+      - .env
+    environment:
+      # Values below win over .env and are specific to the Docker network.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CHROMA_DIR: /data/chroma
+      MEDIA_ROOT: /app/media
+      # Keep the downloaded embedding model across container rebuilds.
+      HF_HOME: /data/hf
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    # Lets OPENROUTER_PROXY=http://host.docker.internal:9383 reach the host
+    # also on Linux (Docker Desktop provides it automatically).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - chroma_data:/data/chroma
+      - media_data:/app/media
+      - hf_cache:/data/hf
+      # Live code mount: edit on the host, see the change without rebuilding.
+      - ./:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  chroma_data:
+  media_data:
+  hf_cache:
