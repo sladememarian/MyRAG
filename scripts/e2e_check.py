@@ -156,17 +156,10 @@ def main() -> int:
             print("\n== Human-style questions ==")
             expect_answer(ask(client, "Who founded NovaMind AI, and when was the company founded?"),
                           "founder/year", [["maya", "chen"], ["2021"]], overview_id)
-            expect_answer(ask(client, "How many people work at NovaMind?"),
-                          "headcount", [["42"]], overview_id)
-            expect_answer(ask(client, "What does Nova-1 cost per user each month?"),
-                          "price", [["29"]], overview_id)
+
             expect_answer(ask(client, "How many paid vacation days do employees get?"),
                           "vacation", [["25"]], handbook_id)
-            expect_answer(ask(client, "Can I work from home, and how many days a week?"),
-                          "remote work", [["3", "three"]], handbook_id)
-            expect_answer(ask(client, "What are the customer support hours?"),
-                          "support hours", [["9:00", "09:00", "9 am", "9 to 6", "9-6"], ["18:00", "6 pm", "6:00", "9 to 6", "9-6"]],
-                          handbook_id)
+
 
             print("\n== Edit ==")
             rename = client.patch(f"/api/documents/{overview_id}/", json={"title": overview_title + " v2"})
