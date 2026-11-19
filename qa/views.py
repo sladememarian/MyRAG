@@ -22,7 +22,7 @@ ERROR_STATUS = {"no_content": 404, "llm": 503, "other": 400}
 @extend_schema(
     summary="Ask a question",
     description=(
-        "Retrieves relevant document chunks, asks the configured OpenRouter model, "
+        "Retrieves relevant document chunks, asks the active LLM, "
         "stores the question/answer in the history and returns the answer with sources."
     ),
     request=AskSerializer,

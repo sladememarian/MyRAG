@@ -1,10 +1,9 @@
 """Question-answering service shared by admin, REST API and tests."""
 import logging
 
-from django.conf import settings
-
 from rag.chain import answer_question
 from rag.errors import LLMError, NoRelevantContentError, RAGError
+from rag.llm import active_model_slug
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ def answer_query(query):
     never loses a failed attempt. `failure_kind` is persisted so the API can
     choose an HTTP status without a runtime-only attribute.
     """
-    query.model_name = settings.OPENROUTER_MODEL
+    query.model_name = active_model_slug()
     query.failure_kind = ""
 
     try:

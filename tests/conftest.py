@@ -78,6 +78,8 @@ def rag_test_environment(settings, tmp_path):
     settings.CHROMA_COLLECTION = f"test_{uuid.uuid4().hex[:12]}"
     settings.MEDIA_ROOT = str(tmp_path / "media")
     settings.RETRIEVAL_USE_MULTI_QUERY = False
+    settings.LLM_RETRY_BACKOFF = 0
+    settings.LLM_KEY_ATTEMPTS = 3
     # Fake embeddings do not carry real semantic similarity; keep every result
     # unless a test explicitly exercises the relevance threshold.
     settings.RETRIEVAL_MIN_SCORE = 0.0

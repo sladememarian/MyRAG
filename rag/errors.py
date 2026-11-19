@@ -18,7 +18,7 @@ class NoRelevantContentError(RAGError):
 
 
 class LLMError(RAGError):
-    """The OpenRouter call failed (network, timeout, rate limit, empty answer)."""
+    """The provider call failed (network, timeout, rate limit, empty answer)."""
 
 
 class LLMConfigurationError(LLMError):

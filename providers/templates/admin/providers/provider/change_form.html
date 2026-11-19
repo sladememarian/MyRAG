@@ -1,0 +1,51 @@
+{% extends "admin/change_form.html" %}
+
+{% block content %}
+  {% if provider_tabs %}
+    <nav style="display:flex;gap:6px;margin:0 0 10px;flex-wrap:wrap">
+      {% for tab in provider_tabs %}
+        <a href="{{ tab.url }}"
+           style="padding:8px 18px;border:1px solid #d5d5d5;border-radius:4px 4px 0 0;text-decoration:none;font-weight:600;
+                  {% if tab.active %}background:#417690;border-color:#417690;color:#fff{% else %}background:#f6f6f6;color:#333{% endif %}">
+          {{ tab.name }}
+        </a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
+  {% if active_model_label %}
+    <p style="margin:0 0 14px;color:#417690">
+      <strong>Answering with:</strong> {{ active_model_label }}
+    </p>
+  {% endif %}
+
+  {{ block.super }}
+{% endblock %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if original and perms.providers.change_provider %}
+    <li>
+      <form method="post"
+            action="{% url 'admin:providers_provider_test' original.pk %}"
+            style="display:inline">
+        {% csrf_token %}
+        <button type="submit" class="button"
+                title="Send a one-word prompt with every active key for this provider">
+          Test connection
+        </button>
+      </form>
+    </li>
+    <li>
+      <form method="post"
+            action="{% url 'admin:providers_provider_discover_free' original.pk %}"
+            style="display:inline">
+        {% csrf_token %}
+        <button type="submit" class="button"
+                title="Ask the provider which models are free and add them to the list">
+          Find free models
+        </button>
+      </form>
+    </li>
+  {% endif %}
+{% endblock %}

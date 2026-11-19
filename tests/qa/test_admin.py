@@ -121,3 +121,104 @@ def test_answer_display_handles_empty_answer():
 def test_sources_display_handles_empty_sources():
     """Requirement: empty source lists render cleanly."""
     assert QueryAdmin(Query, None).sources_display(Query()) == "—"
+
+
+@pytest.mark.django_db
+def test_failed_query_row_shows_state_and_retry_button(admin_client):
+    """Requirement: a failed query is marked failed in the list and gets a retry button."""
+    Query.objects.create(
+        question="سوال ناموفق",
+        status=Query.STATUS_ERROR,
+        failure_kind=Query.FAILURE_LLM,
+        error_message="rate limited",
+    )
+
+    html = admin_client.get("/admin/qa/query/").content.decode()
+
+    assert "Failed" in html
+    assert "Language model error" in html
+    assert "/retry/" in html
+    assert "Retry" in html
+
+
+@pytest.mark.django_db
+def test_successful_query_row_has_no_retry_button(admin_client):
+    """Requirement: only failed questions offer a retry."""
+    Query.objects.create(question="سوال موفق", answer="پاسخ")
+
+    html = admin_client.get("/admin/qa/query/").content.decode()
+
+    assert "Succeeded" in html
+    assert "/retry/" not in html
+
+
+@pytest.mark.django_db
+def test_retry_reruns_a_failed_query(admin_client, monkeypatch):
+    """Requirement: the retry button asks the question again and saves the result."""
+    query = Query.objects.create(
+        question="سوال",
+        status=Query.STATUS_ERROR,
+        failure_kind=Query.FAILURE_LLM,
+        error_message="rate limited",
+    )
+    monkeypatch.setattr(
+        "qa.services.answer_question",
+        lambda question: {
+            "answer": "پاسخ دوباره",
+            "sources": [],
+            "model_name": "fake-model",
+        },
+    )
+
+    response = admin_client.post(f"/admin/qa/query/{query.pk}/retry/")
+
+    assert response.status_code == 302
+    query.refresh_from_db()
+    assert query.status == Query.STATUS_OK
+    assert query.answer == "پاسخ دوباره"
+    assert query.error_message == ""
+
+
+@pytest.mark.django_db
+def test_retry_keeps_the_failure_when_it_fails_again(admin_client, monkeypatch):
+    """Requirement: a failed retry is stored, not swallowed."""
+    from rag.errors import LLMError
+
+    query = Query.objects.create(question="سوال", status=Query.STATUS_ERROR)
+
+    def fail(question):
+        raise LLMError("still rate-limited")
+
+    monkeypatch.setattr("qa.services.answer_question", fail)
+
+    response = admin_client.post(f"/admin/qa/query/{query.pk}/retry/")
+
+    assert response.status_code == 302
+    query.refresh_from_db()
+    assert query.status == Query.STATUS_ERROR
+    assert query.failure_kind == Query.FAILURE_LLM
+    assert "still rate-limited" in query.error_message
+
+
+@pytest.mark.django_db
+def test_retry_rejects_get_requests(admin_client):
+    """Requirement: retrying costs an LLM call, so it must be a POST."""
+    query = Query.objects.create(question="سوال", status=Query.STATUS_ERROR)
+
+    response = admin_client.get(f"/admin/qa/query/{query.pk}/retry/")
+
+    assert response.status_code == 405
+
+
+@pytest.mark.django_db
+def test_model_management_is_a_separate_admin_section(admin_client):
+    """Requirement: model configuration lives in its own Model Management section."""
+    response = admin_client.get("/admin/")
+    apps = {app["app_label"]: app for app in response.context["available_apps"]}
+
+    assert [model["object_name"] for model in apps["qa"]["models"]] == ["Query"]
+    assert apps["providers"]["name"] == "Model Management"
+    # The provider page is the tabbed configuration screen, not a history list.
+    assert [model["object_name"] for model in apps["providers"]["models"]] == [
+        "Provider"
+    ]

@@ -7,7 +7,17 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
+
+from providers.constants import (
+    DEFAULT_BASE_URLS,
+    DEFAULT_MODELS,
+    ITERACOMPUTE,
+    OPENROUTER,
+    ORCAROUTER,
+    TOKENHARBOR,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -67,7 +77,10 @@ if env_bool("TRUST_X_FORWARDED_PROTO", False):
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Replaces "django.contrib.admin" only to use our AdminSite subclass,
+    # which keeps Questions & Answers first on the admin home page. Model
+    # configuration is a separate app, so it gets its own section.
+    "config.apps.RAGAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -80,6 +93,7 @@ INSTALLED_APPS = [
     # Local apps
     "documents",
     "qa",
+    "providers.apps.ProvidersConfig",
 ]
 
 MIDDLEWARE = [
@@ -123,12 +137,18 @@ if env("DB_ENGINE", "postgres") == "sqlite":
         }
     }
 else:
+    DB_PASSWORD = env("POSTGRES_PASSWORD")
+    if not DB_PASSWORD:
+        raise ImproperlyConfigured(
+            "POSTGRES_PASSWORD is not set. Create a .env from .env.example and give "
+            "it a strong password, or use DB_ENGINE=sqlite for a throwaway local run."
+        )
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": env("POSTGRES_DB", "ragdb"),
             "USER": env("POSTGRES_USER", "raguser"),
-            "PASSWORD": env("POSTGRES_PASSWORD", "ragpass"),
+            "PASSWORD": DB_PASSWORD,
             "HOST": env("POSTGRES_HOST", "localhost"),
             "PORT": env("POSTGRES_PORT", "5432"),
         }
@@ -185,16 +205,65 @@ SPECTACULAR_SETTINGS = {
 }
 
 # --------------------------------------------------------------------------- #
-# OpenRouter LLM (OpenAI-compatible)
+# LLM providers (OpenAI-compatible endpoints)
 # --------------------------------------------------------------------------- #
+# Both providers are configured; the model selected in the admin decides which
+# one answers. The values here are fallbacks used before anything is selected.
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", "")
-OPENROUTER_BASE_URL = env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-OPENROUTER_MODEL = env("OPENROUTER_MODEL", "inclusionai/ling-3.2-flash:free")
-OPENROUTER_PROXY = env("OPENROUTER_PROXY", "")
-OPENROUTER_TIMEOUT = env_int("OPENROUTER_TIMEOUT", 60)
-OPENROUTER_MAX_TOKENS = env_int("OPENROUTER_MAX_TOKENS", 800)
-OPENROUTER_TEMPERATURE = env_float("OPENROUTER_TEMPERATURE", 0.0)
+OPENROUTER_BASE_URL = env(
+    "OPENROUTER_BASE_URL", DEFAULT_BASE_URLS[OPENROUTER]
+).rstrip("/")
+OPENROUTER_MODEL = env("OPENROUTER_MODEL", DEFAULT_MODELS[OPENROUTER])
 OPENROUTER_APP_NAME = env("OPENROUTER_APP_NAME", "Document QA RAG")
+# Optional: OpenRouter uses this only for its public rankings page.
+OPENROUTER_SITE_URL = env("OPENROUTER_SITE_URL", "")
+
+ITERACOMPUTE_API_KEY = env("ITERACOMPUTE_API_KEY", "")
+ITERACOMPUTE_BASE_URL = env(
+    "ITERACOMPUTE_BASE_URL", DEFAULT_BASE_URLS[ITERACOMPUTE]
+).rstrip("/")
+ITERACOMPUTE_MODEL = env("ITERACOMPUTE_MODEL", DEFAULT_MODELS[ITERACOMPUTE])
+
+TOKENHARBOR_API_KEY = env("TOKENHARBOR_API_KEY", "")
+TOKENHARBOR_BASE_URL = env(
+    "TOKENHARBOR_BASE_URL", DEFAULT_BASE_URLS[TOKENHARBOR]
+).rstrip("/")
+TOKENHARBOR_MODEL = env("TOKENHARBOR_MODEL", DEFAULT_MODELS[TOKENHARBOR])
+
+ORCAROUTER_API_KEY = env("ORCAROUTER_API_KEY", "")
+ORCAROUTER_BASE_URL = env(
+    "ORCAROUTER_BASE_URL", DEFAULT_BASE_URLS[ORCAROUTER]
+).rstrip("/")
+ORCAROUTER_MODEL = env("ORCAROUTER_MODEL", DEFAULT_MODELS[ORCAROUTER])
+
+# Shared client settings: timeouts and retries are what keep transient provider
+# failures from surfacing as failed questions.
+LLM_TIMEOUT = env_int("LLM_TIMEOUT", env_int("OPENROUTER_TIMEOUT", 60))
+LLM_MAX_TOKENS = env_int("LLM_MAX_TOKENS", env_int("OPENROUTER_MAX_TOKENS", 800))
+LLM_TEMPERATURE = env_float("LLM_TEMPERATURE", env_float("OPENROUTER_TEMPERATURE", 0.0))
+# The OpenAI client retries 429/5xx/timeouts this many times per request.
+LLM_MAX_RETRIES = env_int("LLM_MAX_RETRIES", 3)
+# On top of the SDK retries: how many times one key is tried (with backoff) for
+# transient failures and empty answers before moving on to the next key.
+LLM_KEY_ATTEMPTS = env_int("LLM_KEY_ATTEMPTS", 3)
+LLM_RETRY_BACKOFF = env_float("LLM_RETRY_BACKOFF", 2.0)
+# Timeout for listing a provider's models (some routers are slow here).
+LLM_MODELS_TIMEOUT = env_int("LLM_MODELS_TIMEOUT", 120)
+
+# Proxy for outbound LLM calls. Set either one full URL (LLM_PROXY) or the three
+# parts below; changing only the port in .env is the common case. Inside Docker
+# a loopback host is rewritten to host.docker.internal automatically.
+IN_DOCKER = env_bool("IN_DOCKER", False)
+LLM_PROXY = env("LLM_PROXY", "")
+LLM_PROXY_SCHEME = env("LLM_PROXY_SCHEME", "http")
+LLM_PROXY_HOST = env("LLM_PROXY_HOST", "")
+LLM_PROXY_PORT = env("LLM_PROXY_PORT", "")
+# Deprecated alias kept so older .env files keep working.
+OPENROUTER_PROXY = env("OPENROUTER_PROXY", "")
+
+# Encrypts provider API keys stored by the admin. Empty means "derive from
+# SECRET_KEY"; set a separate value if SECRET_KEY rotation is expected.
+SECRET_ENCRYPTION_KEY = env("SECRET_ENCRYPTION_KEY", "")
 
 # --------------------------------------------------------------------------- #
 # Embeddings, vector store, retrieval and prompting

@@ -1,4 +1,4 @@
-"""Query model: the stored history of questions, answers and sources."""
+"""Stored question/answer history."""
 from django.conf import settings
 from django.db import models
 
@@ -44,8 +44,8 @@ class Query(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        verbose_name = "Query"
-        verbose_name_plural = "Queries"
+        verbose_name = "Question & Answer"
+        verbose_name_plural = "Questions & Answers"
 
     def __str__(self) -> str:
         short = " ".join(self.question.split())
