@@ -76,3 +76,12 @@ def test_build_context_respects_the_character_limit(settings):
     assert len(context) <= 200
     assert len(sources) == 1
     assert len(sources[0]["snippet"]) <= 50
+
+
+def test_plain_text_strips_markdown_marks():
+    """Requirement: answers read cleanly in the admin, which does not render Markdown."""
+    from rag.chain import plain_text
+
+    raw = "**1. Investment:** see [1]\n\n## Pay\n* 5 x 3h\n* `total` = **95%**\n\n\n\nEnd"
+
+    assert plain_text(raw) == "1. Investment: see [1]\n\nPay\n- 5 x 3h\n- total = 95%\n\nEnd"
