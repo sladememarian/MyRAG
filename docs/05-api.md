@@ -117,7 +117,7 @@ curl -X DELETE -H "Authorization: Token $TOKEN" \
   relevant indexed). The failed question is still stored with
   `status="error"` and `failure_kind="no_content"`.
 - `429`: the caller exceeded `ASK_THROTTLE_RATE` (default `20/min`).
-- `503` on `/api/ask/`: OpenRouter failure (rate limit, timeout, key).
+- `503` on `/api/ask/`: selected-provider failure (rate limit, timeout, key).
   The failed question is still stored, with `failure_kind="llm"`.
 - `503` on `DELETE /api/documents/{id}/`: Chroma could not be updated, so the
   document was **not** deleted. Retry once the vector store is available.

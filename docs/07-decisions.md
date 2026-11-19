@@ -11,10 +11,14 @@ feature. The REST API covers programmatic and integration use.
 
 ### 2. Why PostgreSQL + ChromaDB instead of one database?
 
-PostgreSQL is the reliable source of truth for documents, text and history; it
-is transactional and easy to back up. Chroma is purpose-built for vector search
-and persists to a Docker volume, so both survive restarts. Keeping them separate
-means a vector-store rebuild never risks the history or the uploaded files.
+PostgreSQL is the reliable source of truth for documents, text, history and
+provider configuration; it is transactional and easy to back up. Chroma is
+purpose-built for vector search and persists to a Docker volume, so both survive
+restarts. Chroma runs **embedded** inside the Django process rather than as a
+Compose service: there is a single writer, the corpus is small, and this avoids
+an extra network service and its authentication surface while keeping the same
+durability through the `chroma_data` volume. Keeping the stores separate means a
+vector-store rebuild never risks the history or the uploaded files.
 
 ### 3. Why a local embedding model?
 
@@ -135,7 +139,68 @@ per-user `ASK_THROTTLE_RATE` (default `20/min`) keeps one caller from exhausting
 the quota for everyone. It is a simple DRF cache throttle; no Redis or Celery
 is needed for a single-container deployment.
 
-### 19. Trade-offs accepted
+### 19. Why is model configuration a separate app with provider tabs?
+
+Free OpenRouter models are rate-limited and availability changes, so editing
+`.env` and restarting the container is a poor way to try another one. A second
+provider (Itera Compute) is also required. Configuration was moved out of
+**Questions & Answers** into the `providers` app, whose admin title is **Model
+Management**. It stores `Provider`, `APIKey` and `LLMModel` rows; each supported
+provider is a tab, so switching between providers does not
+involve searching a list. The pipeline resolves the active row on every question
+(`rag/llm.py`); the env values stay the fallback, so nothing breaks before an
+admin adds a model. An exclusive partial unique constraint keeps the choice
+unambiguous, and the selected model is recorded on each `Query` as `model_name`
+for auditability. There is no silent cross-provider switch: a failing provider
+reports the error instead of quietly answering with a different model.
+
+### 20. Why a custom `AdminSite`?
+
+Django sorts models in an app alphabetically. The small
+`RAGAdminSite.get_app_list()` override puts question history first, matching how
+operators use the page. Model configuration lives in its own app, so it is
+listed as a separate **Model Management** section instead of below the history.
+It is wired in via `AdminConfig.default_site` (Django's supported extension
+point), so all normal admin URLs, permissions and `admin.site` registrations
+keep working.
+
+### 21. Why encrypt API keys in the database?
+
+The brief requires several keys per provider and a selectable model, which means
+keys must be stored. Environment variables alone cannot support adding keys from
+the admin. Keys are encrypted with Fernet (`cryptography`) using
+`SECRET_ENCRYPTION_KEY` (or `SECRET_KEY`), the admin renders only a mask, and a
+form left blank keeps the existing ciphertext. A database dump therefore does
+not disclose usable credentials. Rotating the secret makes old rows unreadable
+by design rather than returning garbage.
+
+### 22. Why are provider base URLs constants, not admin fields?
+
+Allowing an admin to edit an API root would turn the answering pipeline into a
+server-side request forgery primitive: it would send prompts (and potentially
+responses) to any host. The supported roots are constants in
+`providers/constants.py`, overridable only by the deployment through
+`OPENROUTER_BASE_URL` / `ITERACOMPUTE_BASE_URL`. The admin can add keys and
+models, which are the parts that legitimately change.
+
+### 23. Why is failover per key, not per provider?
+
+A provider can have several keys with different quotas. The client retries
+401/402/403/408/409/429/5xx, timeouts and connection errors with the next key of
+the **same** provider, plus the OpenAI SDK's own retries (`LLM_MAX_RETRIES`).
+Permanent errors such as 400 are surfaced immediately. This reduces failed
+questions caused by one exhausted key without changing which model the operator
+selected.
+
+### 24. Why is the proxy a first-class setting?
+
+The proxy address changes regularly. `LLM_PROXY` (full URL) or
+`LLM_PROXY_SCHEME`/`HOST`/`PORT` in `.env` make it a one-line edit, with no code
+change. Inside Docker a loopback host is rewritten to `host.docker.internal`, so
+the same file works on the host and in the container. Only http(s) and SOCKS
+schemes are accepted.
+
+### 25. Trade-offs accepted
 
 - Single container, synchronous ingestion: simplest to run and explain, not
   built for thousands of documents.

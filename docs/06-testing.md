@@ -6,7 +6,7 @@
 docker compose run --rm web pytest            # default: everything except live
 docker compose run --rm web pytest -v         # verbose
 docker compose run --rm web pytest tests/rag  # one folder
-docker compose run --rm web pytest -m live    # real OpenRouter call (uses quota)
+docker compose run --rm web pytest -m live    # real provider call (uses quota)
 ```
 
 `pytest.ini` sets `DJANGO_SETTINGS_MODULE=config.settings`,
@@ -31,6 +31,12 @@ E2E_TOKEN=<token> docker compose exec -T web python scripts/e2e_check.py
 
 Set `E2E_BASE_URL` for another host and `E2E_KEEP=1` to leave the test
 documents in place. It exits non-zero if any check fails.
+
+The check makes only five LLM calls (two facts, one edited fact, one
+ungrounded question, one post-delete question) so it is cheap on free quotas.
+Set `RETRIEVAL_USE_MULTI_QUERY=False` on the server to avoid the extra
+query-rewrite calls. Without the local `sentence-transformers` package, start
+the server with `EMBEDDING_BACKEND=fake RETRIEVAL_MIN_SCORE=0`.
 
 ## Why the tests are offline and deterministic
 
@@ -67,6 +73,10 @@ tests/
     test_services.py        success, ownership, no-content, LLM/safe unexpected errors
     test_admin.py           question answering in admin, ownership, immutability
     test_ask_command.py     management command output + errors
+  providers/
+    test_models.py          provider seed, encryption, masks, exclusive active model
+    test_admin.py           tabs, inline keys/models, masking, test-connection button
+    test_import_env_keys.py one-time .env key import, no overwrite
   api/
     test_documents.py       auth, upload, safe errors, update, blocked delete
     test_ask.py             answer + history, 404, 503, validation, throttling
@@ -75,17 +85,18 @@ tests/
 
 Every test has a one-line docstring naming the brief requirement it verifies.
 
-**Last run:** `74 passed, 1 deselected` (the `live` test) in ~38 s inside the
-Docker image with PostgreSQL. Locally, set `DB_ENGINE=sqlite` before running
-pytest; Docker uses PostgreSQL through the same settings. `pytest -m live`
-calls the real free OpenRouter model.
+**Last run:** `115 passed, 1 deselected` (the `live` test) in ~84 s locally
+with SQLite. Inside the Docker image with PostgreSQL the same suite runs without
+extra setup. To run locally, set `DB_ENGINE=sqlite` before pytest; Docker uses
+PostgreSQL through the same settings. `pytest -m live` calls the real selected
+provider (OpenRouter by default).
 
 ## Live test
 
-`tests/rag/test_live_llm.py` uses the real OpenRouter model and the real
-`answer_question()` flow (embeddings stay fake for speed). It is skipped unless
-you pass `-m live` and `OPENROUTER_API_KEY` is set. Free models have a daily
-cap, so it is deliberately excluded from normal runs.
+`tests/rag/test_live_llm.py` uses the real selected model (OpenRouter by default)
+and the real `answer_question()` flow (embeddings stay fake for speed). It is
+skipped unless you pass `-m live` and the configured provider has a key. Free
+models have a daily cap, so it is deliberately excluded from normal runs.
 
 ## What is not covered
 

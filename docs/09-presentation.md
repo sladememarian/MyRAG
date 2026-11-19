@@ -9,15 +9,17 @@ and full history."
 ## 1. Demo (3 min)
 
 1. `docker compose up` → show `/admin/` logged in.
-2. Documents → upload `01-jangal-iran.docx` → point at the message
+2. Model Management → show the provider tabs and the Find free models button, masked key,
+   "Answering with", and **Test connection**.
+3. Documents → upload `01-jangal-iran.docx` → point at the message
    "indexed into N chunks" and the read-only full text.
-3. Queries → Add query → `جنگل هیرکانی کجاست؟` → show the Persian answer,
+4. Queries → Add query → `جنگل هیرکانی کجاست؟` → show the Persian answer,
    sources JSON, model name, status.
-4. `/api/docs/` → POST `/api/ask/` with a token → show JSON answer + sources.
-5. History list → point out the stored question, sources and date, and one
+5. `/api/docs/` → POST `/api/ask/` with a token → show JSON answer + sources.
+6. History list → point out the stored question, sources and date, and one
    failed entry with `status=error` (LLM failures are history too). Show that
    history is scoped to the logged-in user.
-6. Ask an off-topic question → `404` because no chunk reaches
+7. Ask an off-topic question → `404` because no chunk reaches
    `RETRIEVAL_MIN_SCORE`; ask again quickly to show the `429` throttle.
 
 ## 2. Architecture (2 min)
@@ -25,8 +27,12 @@ and full history."
 Show `docs/01-architecture.md` diagram:
 
 - Django (admin + DRF) in one container
-- PostgreSQL (documents, history), Chroma volume (chunks), media volume
-- local multilingual embeddings; OpenRouter for generation
+- PostgreSQL (documents, history, provider config), Chroma volume (chunks),
+  media volume
+- Chroma is embedded in the Django process (not a separate container) with one
+  writer and a persistent volume
+- local multilingual embeddings; OpenRouter, Itera Compute, Token Harbor or Orca Router for generation,
+  selected in Model Management
 - `rag/services.py` is the single path used by admin and API
 
 ## 3. End-to-end flow (2 min)
@@ -58,7 +64,7 @@ Pick four from `docs/07-decisions.md`:
 ## 6. Close (15 s)
 
 "Everything is in the README: Docker one-liner, API examples, sample documents
-with expected answers, and 70+ offline tests."
+with expected answers, and 115 offline tests."
 
 ---
 
@@ -66,10 +72,12 @@ with expected answers, and 70+ offline tests."
 
 | Question | Answer |
 |---|---|
-| Why Chroma and not pgvector? | Chroma is a dedicated vector store with persistence; PostgreSQL stays the source of truth. Swapping is isolated in `rag/vectorstore.py`. |
-| What if OpenRouter is down? | The question is still saved with `status=error`; API returns 503 with a readable message; retrieval itself does not depend on the LLM. |
+| Why Chroma and not pgvector? | Chroma is a dedicated vector store with persistence; PostgreSQL stays the source of truth. It runs embedded in Django with one writer, so no extra service is needed. Swapping is isolated in `rag/vectorstore.py`. |
+| Why is Chroma not a Compose container? | Embedded `PersistentClient` + `chroma_data` volume is enough for a single-writer, small corpus; a server would add a port, auth surface and healthcheck without a benefit. Server mode is the upgrade path for multiple writers. |
+| What if a provider is down? | The question is still saved with `status=error`; API returns 503 with a readable message; retrieval itself does not depend on the LLM. Key failover stays within the selected provider, so history never lies about the model. |
+| How are API keys protected? | Several keys per provider, encrypted at rest with Fernet; the admin only renders a mask; `.env` keys are a fallback/import source. |
 | Why fake embeddings in tests? | Determinism and offline runs; the real model's semantic quality is not what unit tests should assert. |
 | How do you avoid duplicate chunks? | Delete by `document_id` before add + deterministic ids. |
 | Is the answer really grounded? | The prompt forbids outside knowledge, requires an explicit "not in the documents" answer, and the returned sources are exactly the chunks used. |
-| How would you scale? | Multiple web workers (Chroma is already persistent), move indexing to a queue, add a reranker, cache embeddings. |
+| How would you scale? | Run Chroma in server mode for multiple web replicas (the embedded store assumes one writer), move indexing to a queue, add a reranker, cache embeddings. |
 | Why no frontend? | The brief requires admin only; the API is documented for integrations. |

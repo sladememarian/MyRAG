@@ -9,7 +9,8 @@ service protects data and LLM quota, and how to check that everything works.
 |---|---|---|
 | `DEBUG` | `False` (default) | never show tracebacks or settings publicly |
 | `SECRET_KEY` | long random value | sessions and tokens are signed with it |
-| `POSTGRES_PASSWORD` | strong, unique | the default `ragpass` is rejected by a deploy check |
+| `SECRET_ENCRYPTION_KEY` | separate long random value | encrypts admin-stored provider keys; empty falls back to `SECRET_KEY` |
+| `POSTGRES_PASSWORD` | strong, unique, **must be set** | Compose refuses to start without it; there is no literal fallback |
 | `ALLOWED_HOSTS` | your domain(s) | blocks Host-header spoofing |
 | `CSRF_TRUSTED_ORIGINS` | `https://your-domain` | lets the admin login form work behind HTTPS |
 | `SECURE_PROXY_SSL_HEADER` | `True` only behind a trusted proxy | tells Django the request was HTTPS |
@@ -35,8 +36,15 @@ If the app is reached over plain HTTP inside a private network, set
 `config/checks.py` adds two errors:
 
 - `config.E001` — no `SECRET_KEY` was provided (the ephemeral key changes on
-  every restart, which would log everyone out).
-- `config.E002` — `POSTGRES_PASSWORD` is still the development default.
+  every restart, which would log everyone out and make encrypted keys
+  unreadable).
+- `config.E002` — `POSTGRES_PASSWORD` is a shipped placeholder or shorter than
+  12 characters.
+
+The literal `ragpass` fallback is gone from both `docker-compose.yml` and
+`settings.py`. Compose uses `${POSTGRES_PASSWORD:?...}`, and Django raises
+`ImproperlyConfigured` when the variable is missing, so a forgotten password
+fails at startup rather than silently deploying a known credential.
 
 Run the full check with real production values:
 
@@ -127,7 +135,109 @@ unexpected failures are logged with full detail server-side. This keeps stack
 traces and provider responses out of public JSON without making debugging
 harder.
 
-## 7. Dependencies
+## 7. Provider credentials at rest
+
+Keys added in **Admin → Model Management** are stored as Fernet ciphertext
+(`providers/crypto.py`), keyed from `SECRET_ENCRYPTION_KEY` or `SECRET_KEY`.
+Properties:
+
+- the plaintext key is never rendered into HTML after saving;
+- the list shows only a mask (`ick_li…3e71`);
+- leaving the password input empty keeps the existing ciphertext;
+- provider error messages are scrubbed of key material before they are stored;
+- changing `SECRET_KEY` (with no separate encryption key) makes old rows
+  unreadable by design; the admin shows *unreadable* and the key must be
+  re-entered.
+
+`.env` keys remain supported as fallbacks and as the source for
+`manage.py import_env_keys`, but the database store is what the admin manages.
+
+## 8. Provider URLs, proxy and SSRF
+
+Provider API roots are constants in `providers/constants.py`; the admin cannot
+edit them. Only the deployment can override them through
+`<PROVIDER>_BASE_URL` (e.g. `ORCAROUTER_BASE_URL`). This blocks an admin from
+turning the answering pipeline into a request-forgery primitive.
+
+The proxy is read from `LLM_PROXY` or `LLM_PROXY_SCHEME/HOST/PORT`. Only
+`http`, `https`, `socks4`, `socks5` and `socks5h` are accepted; anything else is
+rejected with a configuration error. A loopback host is rewritten to
+`host.docker.internal` only when `IN_DOCKER=1`, which Compose sets.
+
+## 9. Upload validation
+
+`documents/validators.py` verifies more than the extension:
+
+- the first two bytes are the ZIP signature (`PK`);
+- the archive contains `word/document.xml`;
+- the declared uncompressed size is at most 20× the upload limit, which rejects
+  small ZIP bombs before `python-docx` parses them.
+
+The size limit is still `MAX_DOCUMENT_SIZE_MB`. Rejected files never reach the
+extractor or the vector store.
+
+## 10. Audit results
+
+Scans run on the project source (2026-11-19):
+
+| Scan | Result |
+|---|---|
+| `bandit -r config documents qa rag providers` | 0 findings after one false positive (`0.0.0.0` in the loopback rewrite set) was annotated with `# nosec B104` and a reason |
+| `python manage.py check --deploy` with production values | 0 issues |
+| `pip-audit -r requirements-base.txt` | DRF advisories fixed by requiring `djangorestframework>=3.18.2` |
+
+Remaining `pip-audit` advisories (26 in 8 libraries at the time of writing) are
+in packages whose affected code paths this project does not use. They are
+accepted and listed, not hidden:
+
+| Package | Advisory area | Why it does not apply here |
+|---|---|---|
+| LangChain 0.3.x | filesystem agents, glob/path confinement, prompt loading from untrusted config | no agents, no `load_prompt()` from user input, no filesystem tools |
+| langchain-core / langchain-openai | image token counting SSRF | no images or vision models; only text messages are sent |
+| langchain-text-splitters | `split_text_from_url()` redirect SSRF | only local plain text is split; no URL splitting |
+| ChromaDB | server-mode pre-auth code injection and tenant authorization | used as an embedded `PersistentClient`, no HTTP server or tenants |
+| sentence-transformers / transformers | malicious model directory or checkpoint loading | a fixed official model id is downloaded once; no user-supplied checkpoints or local model paths |
+| pytest | local `/tmp` directory handling | test tooling only; not reachable from the web app |
+
+Upstream fix versions for several of these are major-version upgrades
+(LangChain 1.x, transformers 5.x). Upgrading them without an integration pass
+would risk breaking the RAG stack, so they are tracked as dependency-upgrade
+work rather than silently forced. Re-run `pip-audit` before the next release.
+
+Two accepted application-level risks are documented rather than silently
+ignored:
+
+- any authenticated API user can manage documents (the brief does not define
+  roles beyond authentication); put the API behind a trusted network or add
+  per-object permissions if that changes;
+- the development image runs as root and uses Django's development server, as
+  the brief requires `docker compose up`; use a non-root user and a WSGI server
+  for an internet-facing deployment.
+
+## 11. GitGuardian: the Postgres password finding
+
+The reported line was:
+
+```yaml
+POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpass}
+```
+
+`.env` did supply the real password, and Compose prefers it, so the running
+container was not using `ragpass`. The problem is the **inline default itself**:
+a scanner sees a literal credential committed to Git, and anyone who starts the
+stack without `.env` (CI, a fresh clone, a forgotten variable) silently gets
+that known password. "It is only a fallback" is not a security boundary.
+
+The fix removes the literal from every layer:
+
+- `docker-compose.yml` uses `${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}`,
+  so Compose stops with an explanatory error;
+- `config/settings.py` raises `ImproperlyConfigured` when the variable is
+  missing;
+- `.env.example` contains `change-me-strong-password`, an obvious placeholder;
+- `.env` stays git-ignored, so the real value is never committed.
+
+## 12. Dependencies
 
 - `requirements-base.txt` — Django, DRF, LangChain, Chroma, document tooling.
 - `requirements.txt` — base plus the local test/lint tools.
@@ -136,13 +246,16 @@ harder.
 The Docker image installs the base and Docker files, keeping PyTorch CPU-only
 and avoiding a second multi-gigabyte CUDA download.
 
-## 8. Verification checklist
+## 13. Verification checklist
 
 ```bash
-# apply migrations (adds query owner and failure kind)
+# apply migrations (providers, encrypted keys, model split)
 docker compose exec web python manage.py migrate
 
-# 74 offline tests, PostgreSQL, fake embeddings and mocked LLM
+# import existing .env keys once (admin store)
+docker compose exec web python manage.py import_env_keys
+
+# 115 offline tests, PostgreSQL, fake embeddings and mocked LLM
 docker compose exec web pytest
 
 # production configuration
@@ -152,16 +265,27 @@ docker compose exec web python manage.py check --deploy
 E2E_TOKEN=<token> .venv/Scripts/python.exe scripts/e2e_check.py
 ```
 
-The e2e script needs a working `OPENROUTER_API_KEY`; free models can return
+The e2e script needs a working selected provider key; free models can return
 `503` when their shared quota is exhausted. That is an external limit, not an
 application failure — the query is still stored with `status=error`.
+
+### Credential rotation
+
+If a key is pasted into chat, a ticket, or a log, treat it as compromised:
+create a new key at the provider, add it in **Model Management**, press **Test
+connection**, then deactivate and delete the old key. Rotating the `.env`
+fallback follows the same rule: update `.env`, recreate the container, and run
+`import_env_keys` only for providers that have no admin keys yet.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---|---|---|
 | `config.E001` on start | no `SECRET_KEY` | set a long random value |
-| `config.E002` on start | default DB password | set `POSTGRES_PASSWORD` |
+| `config.E002` on start | `POSTGRES_PASSWORD` is a placeholder or too short | set a unique password of at least 12 characters |
+| Compose says `Set POSTGRES_PASSWORD in .env` | missing variable | add it to `.env`; there is no default |
+| stored key shows *unreadable* | `SECRET_KEY`/`SECRET_ENCRYPTION_KEY` changed | re-enter the key in Model Management |
+| `has no usable API key` | provider has no active key and no `.env` fallback | add a key in Model Management or run `import_env_keys` |
 | admin login loops over HTTP | secure cookies + redirect | terminate HTTPS at the proxy or set `SECURE_SSL_REDIRECT=False` |
 | `429` on every ask | rate limit too low for a shared account | raise `ASK_THROTTLE_RATE` |
 | valid question returns `404` | threshold too high | lower `RETRIEVAL_MIN_SCORE` and compare source scores |
