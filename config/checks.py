@@ -26,15 +26,27 @@ def production_settings(app_configs, **kwargs):
         )
 
     database = settings.DATABASES["default"]
-    if (
-        not settings.DEBUG
-        and "postgresql" in database["ENGINE"]
-        and database.get("PASSWORD") == "ragpass"
-    ):
+    password = ""
+    if "postgresql" in database["ENGINE"]:
+        password = database.get("PASSWORD") or ""
+    # Placeholders shipped in .env.example are not secrets, and a very short
+    # password is brute-forceable. Both are deployment errors, not warnings.
+    placeholder = password.lower() in {
+        "ragpass",
+        "change-me-strong-password",
+        "password",
+        "postgres",
+        "admin",
+    }
+    if not settings.DEBUG and password and (placeholder or len(password) < 12):
         issues.append(
             Error(
-                "POSTGRES_PASSWORD is still the default 'ragpass'.",
-                hint="Set a strong POSTGRES_PASSWORD in the environment.",
+                "POSTGRES_PASSWORD is a placeholder or too short.",
+                hint=(
+                    "Set a unique POSTGRES_PASSWORD of at least 12 characters in "
+                    "the environment. Generate one with: python -c "
+                    "\"import secrets; print(secrets.token_urlsafe(24))\""
+                ),
                 id="config.E002",
             )
         )

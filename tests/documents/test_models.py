@@ -61,3 +61,41 @@ def test_validator_rejects_oversized_file(settings, docx_file):
     settings.MAX_DOCUMENT_SIZE_MB = 0
     with pytest.raises(ValidationError, match="too large"):
         validate_docx_file(docx_file())
+
+
+def _zip_bytes(entries):
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_validator_rejects_a_renamed_file():
+    """Requirement: a .docx name is not enough; the file must be a ZIP."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    with pytest.raises(ValidationError, match="not a ZIP archive"):
+        validate_docx_file(SimpleUploadedFile("fake.docx", b"not a zip at all"))
+
+
+def test_validator_rejects_a_zip_that_is_not_a_word_document():
+    """Requirement: ordinary ZIP archives are not accepted as documents."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    data = _zip_bytes({"readme.txt": "hello"})
+    with pytest.raises(ValidationError, match="not a Word document"):
+        validate_docx_file(SimpleUploadedFile("archive.docx", data))
+
+
+def test_validator_rejects_a_zip_bomb(settings):
+    """Requirement: a tiny upload cannot expand into a huge document."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    settings.MAX_DOCUMENT_SIZE_MB = 0.05  # 50 KiB -> 1 MiB expanded allowance
+    data = _zip_bytes({"word/document.xml": b"\0" * 2_000_000})
+    with pytest.raises(ValidationError, match="unexpectedly large"):
+        validate_docx_file(SimpleUploadedFile("bomb.docx", data))
