@@ -190,7 +190,7 @@ def main() -> int:
                       "404 explains that no relevant content was found", detail[:200])
             else:
                 check(any(phrase in unknown_answer for phrase in
-                          ("not in the", "not mentioned", "no information", "does not contain", "not provided", "cannot find")),
+                          ("not in the", "not mentioned", "no information", "does not contain", "do not contain", "not provided", "cannot find", "says nothing")),
                       "ungrounded answer says the documents do not cover it", unknown_answer[:200])
 
             print("\n== History ==")

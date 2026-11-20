@@ -26,3 +26,10 @@ Thumbs.db
 context_block.md
 prompts.md
 private_docs/
+
+# --- Secrets and local artefacts -----------------------------------------
+.env.*
+!.env.example
+*.zip
+.e2e_*/
+.e2e_*
